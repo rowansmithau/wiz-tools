@@ -24,7 +24,10 @@ CURRENT_EPOCH=$(date -u +%s)
 # Check if the expiration time is in the past
 if [[ "$CURRENT_EPOCH" -ge "$EXPIRES_AT_EPOCH" ]]; then
     echo "Token expired. Running 'wizcli auth'..."
-    wizcli auth --use-device-code
+    if ! wizcli auth --use-device-code; then
+        echo "Failed to authenticate. Exiting."
+        exit 1
+    fi
 else
     echo "Token is still valid. Proceeding."
 fi
@@ -42,7 +45,7 @@ get_latest_version() {
     }')
 
     LATEST_VERSION=$(curl -sk -X POST -H "Authorization: Bearer $(jq -r '.access_token' < ~/.wiz/auth.json)" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" https://api.${WIZ_DC}.app.wiz.io/graphql | jq -r '.data.cliReleases.nodes[0].version')
-}
+    }
 
 # Function to install the latest version
 install_latest_version() {
@@ -51,16 +54,25 @@ install_latest_version() {
 
     echo "Downloading version: $LATEST_VERSION"
     echo "You will (likely) be prompted for your password"
-    curl -sk https://wizcli.app.wiz.io/latest/wizcli-darwin-arm64 -o wizcli
+    if ! curl -sk https://wizcli.app.wiz.io/latest/wizcli-darwin-arm64 -o wizcli; then
+        echo "Failed to download the latest version. Exiting."
+        exit 1
+    fi
     chmod +x wizcli
-    sudo mv wizcli "$INSTALL_PATH"
+    if ! sudo mv wizcli "$INSTALL_PATH"; then
+        echo "Failed to move the wizcli binary to $INSTALL_PATH. Exiting."
+        exit 1
+    fi
     echo "WizCLI installed successfully at $INSTALL_PATH."
 }
 
 # Get local WizCLI version.
 # This is output to a file because the output of WizCLI ignores filtering commands such as 'head'.
 get_installed_version() {
-    wizcli version -T &> wizcli-ver.txt
+    if ! wizcli version -T &> wizcli-ver.txt; then
+        echo "Failed to get the installed version. Exiting."
+        exit 1
+    fi
     LOCAL_VERSION=$(awk 'NR==1 {gsub(",", "", $3); sub(/^v/, "", $3); print $3}' wizcli-ver.txt)
     rm wizcli-ver.txt
 }
