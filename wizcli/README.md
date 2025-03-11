@@ -9,8 +9,8 @@ And a `.zshrc` or `.bashrc` function to easily call it, just set your own `SCRIP
 wizcli_update() {
     SCRIPT_PATH="~/Downloads/wiz-git/wiz-tools/wizcli/wizcli-latest.sh"
 
-    if [ ! -x "$SCRIPT_PATH" ]; then
-        echo "Error: $SCRIPT_PATH is not executable."
+    if [ ! -f "$SCRIPT_PATH" ]; then
+        echo "Error: $SCRIPT_PATH is not present."
         return 1
     fi
 
