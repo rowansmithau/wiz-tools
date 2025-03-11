@@ -6,6 +6,9 @@
 # It uses the token from your existing WizCLI install, and if expired, triggers a new authentication flow.
 # Written for MacOS Apple Silicon (arm64) architecture.
 
+## 11/3/2025
+## - not using this version anymore as the auth to wiz requirement is not actually required.
+
 # Local installation path
 INSTALL_PATH=$(which wizcli)
 
