@@ -2,8 +2,7 @@
 
 # rowan smith - 11/3/2025
 # This script checks if the installed WizCLI version is up-to-date, and if not, downloads and installs the latest version.
-# It will query the Wiz API to get the latest version and compare it with the installed version.
-# It uses the token from your existing WizCLI install, and if expired, triggers a new authentication flow.
+# It will check the version installed and compare it with the latest version available based on the output of the WizCLI version command.
 # Written for MacOS Apple Silicon (arm64) architecture.
 
 # Local installation path
