@@ -1,0 +1,12 @@
+#cloud-config
+
+system_info:
+  default_user:
+    name: shikari
+
+chpasswd:
+  expire: false
+  users:
+  - {name: shikari, password: shikari, type: text}
+ssh_pwauth: True
+resize_rootfs: True

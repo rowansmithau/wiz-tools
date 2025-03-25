@@ -1,0 +1,243 @@
+plain: true
+provision:
+  - mode: system # install Vault license. Required if the image is built using enterprise binary.
+    script: |
+      #!/bin/bash
+
+      if [[ -n $VAULT_LICENSE ]]; then
+        echo "VAULT_LICENSE=$VAULT_LICENSE" > /etc/vault.d/vault.env
+      fi
+
+  - mode: system # install Consul license. Required if the image is built using enterprise binary.
+    script: |
+      #!/bin/bash
+
+      if [[ "${HOSTNAME}" != "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+        exit 0
+      fi
+
+      if [[ -n $CONSUL_LICENSE ]]; then
+        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+      fi
+
+  - mode: system # generate certificates
+    script: |
+      #!/bin/bash
+
+      # avoid running the script on restarts
+      if [[ -f /shikari-bootstrapped ]] then
+        exit 0
+      fi
+
+      cd /etc/vault.d/certs
+
+      consul tls cert create -domain vault -server -additional-ipaddress $(ip -json -4 addr show lima0  | jq -r '.[] | .addr_info[].local') -additional-dnsname ${HOSTNAME}.local
+      
+      chown -R vault:vault /etc/vault.d/certs/*
+
+  - mode: system # start Consul for coordination
+    script: |
+      #!/bin/bash
+
+      if [[ "${HOSTNAME}" != "lima-${SHIKARI_CLUSTER_NAME}-srv-01" ]]; then
+        exit 0
+      fi
+
+      # common config for Server and Client
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "INFO"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
+
+        server = true
+        bootstrap_expect = 1
+      EOF
+
+      # Start Consul Service
+      systemctl start consul
+
+  - mode: system # configure Vault Server
+    script: |
+      #!/bin/bash
+
+      # avoid running the script on restarts
+      if [[ -f /shikari-bootstrapped ]]; then
+        exit 0
+      fi
+
+      HOSTNAME=$(hostname -s)
+
+      cat <<-EOF > /etc/vault.d/vault.hcl
+      api_addr     = "https://${HOSTNAME}.local:8200"
+      cluster_addr = "https://${HOSTNAME}.local:8201"
+      
+      ui = true
+      log_level="trace"
+      raw_storage_endpoint = "true"
+      enable_response_header_hostname = "true"
+      enable_response_header_raft_node_id = "true"
+
+      reporting {
+        license {
+          enabled = false
+        }
+      }
+
+      user_lockout "all" {
+       disable_lockout = "true"
+      }
+
+      storage "raft" {
+        path = "/opt/vault"
+        node_id = "${HOSTNAME}"
+
+        $(for x in $(seq $SHIKARI_SERVER_COUNT); do
+        echo retry_join {
+        echo leader_api_addr      = \"https://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200\"
+        echo leader_ca_cert_file  = \"/etc/vault.d/certs/vault-agent-ca.pem\"
+        echo }
+       done)
+      }
+
+      listener "tcp" {
+        address       = "0.0.0.0:8200"
+        
+        tls_cert_file       = "/etc/vault.d/certs/dc1-server-vault-0.pem"
+        tls_key_file        = "/etc/vault.d/certs/dc1-server-vault-0-key.pem"
+        tls_client_ca_file  = "/etc/vault.d/certs/vault-agent-ca.pem"
+        
+        cluster_address = "0.0.0.0:8201"
+
+        telemetry {
+          unauthenticated_metrics_access = true
+        }
+      }
+
+      telemetry {
+        enable_hostname_label = true
+        disable_hostname = true
+        prometheus_retention_time = "60s"
+      }
+
+      replication {
+        allow_forwarding_via_header = true
+        allow_forwarding_via_token = "new_token"
+      }
+      
+      # this will disable perf standby even if the license allows
+      #disable_performance_standby = true
+      EOF
+
+      # Use nomad to format the config file if it exists
+      command -v nomad &>/dev/null && nomad fmt /etc/vault.d/vault.hcl
+
+  - mode: system  # start and enable Vault
+    script: |
+      systemctl enable --now vault
+
+  - mode: system  # init and unseal Vault
+    script: |
+      #!/usr/bin/env bash
+
+      # avoid running the script on restarts
+
+      if [[ -f /shikari-bootstrapped ]]; then
+        exit 0
+      fi
+
+      export VAULT_ADDR=https://127.0.0.1:8200
+      export VAULT_CACERT=/etc/vault.d/certs/vault-agent-ca.pem
+      
+      if [[ "$HOSTNAME" == *"01"* ]]; then
+        
+        until curl -s --cacert /etc/vault.d/certs/vault-agent-ca.pem $VAULT_ADDR/v1/sys/health; do
+          echo "Waiting for Vault"
+        done
+
+        vault operator init -key-shares=1 -key-threshold=1 -format=json > ~/VaultCreds.json
+        
+        mv ~/VaultCreds.json /etc/vault.d/VaultCreds.json
+        chown root:vault /etc/vault.d/VaultCreds.json
+        chmod 0640 /etc/vault.d/VaultCreds.json
+
+        mkdir /opt/vault/audit
+        chown vault:vault /opt/vault/audit
+        
+        VAULT_UNSEAL_KEY=$(jq -r .unseal_keys_b64[0] < /etc/vault.d/VaultCreds.json)
+        VAULT_TOKEN=$(jq -r .root_token < /etc/vault.d/VaultCreds.json)
+        
+        echo export VAULT_ADDR="https://127.0.0.1:8200" | tee -a /etc/profile.d/vault.sh
+        echo export VAULT_CACERT=$VAULT_CACERT | tee -a /etc/profile.d/vault.sh
+        echo export VAULT_UNSEAL_KEY=$VAULT_UNSEAL_KEY | tee -a /etc/profile.d/vault.sh 
+        echo export VAULT_TOKEN=$VAULT_TOKEN | tee -a /etc/profile.d/vault.sh      
+
+        # Unseal Vault      
+        vault operator unseal ${VAULT_UNSEAL_KEY}
+
+        vault login ${VAULT_TOKEN}
+
+        # execute the following in a subshell to not overwrite VAULT_ADDR
+        (
+          if [[ $SHIKARI_SERVER_COUNT > 1 ]]; then
+            for x in `seq 2 $SHIKARI_SERVER_COUNT`; do
+
+              VAULT_ADDR="https://lima-${SHIKARI_CLUSTER_NAME}-srv-0$x.local:8200"
+
+              until [ "$(curl -s --cacert $VAULT_CACERT $VAULT_ADDR/v1/sys/health | jq -r '.initialized')" = "true" ]; do
+                echo "Waiting for Vault"
+                sleep 2
+              done
+
+              vault operator unseal $VAULT_UNSEAL_KEY
+            done
+          fi
+        )
+
+        vault audit enable file file_path=/opt/vault/audit/vault-audit.log log_raw=true
+      fi
+
+      touch /shikari-bootstrapped
+
+  - mode: system  # Write some data to Vault so it is viewable later, i.e. prove Vault was not re-initialised
+    script: |
+      #!/usr/bin/env bash
+
+      if [[ "$HOSTNAME" == *"01"* ]]; then
+
+        source /etc/profile.d/vault.sh
+
+        vault secrets enable -description="NiceCorp super secret KV engine" kv
+
+        vault kv put kv/quorum-test red=mercury
+
+        export CONSUL_HTTP_ADDR=http://lima-${SHIKARI_CLUSTER_NAME}-srv-01.local:8500
+        consul kv put done
+      fi
+
+  - mode: system  # Commence breaking quorum within Vault
+    script: |
+      #!/usr/bin/env bash
+
+      export CONSUL_HTTP_ADDR=http://lima-${SHIKARI_CLUSTER_NAME}-srv-01.local:8500
+      until consul kv get done; do echo "waiting for bootstrap to finish"; sleep 1; done
+      
+      systemctl stop vault
+
+      rm /opt/vault/raft/raft.db
+
+      awk -i inplace 'BEGIN { in_block=0 } /^  retry_join {$/ { in_block=1 } /^  }$/ && in_block { in_block=0; next } !in_block { print }' /etc/vault.d/vault.hcl
+
+      systemctl start vault
+
+copyToHost:
+  - guest: "/etc/vault.d/certs/vault-agent-ca.pem"
+    host: "{{.Dir}}/copied-from-guest/vault-agent-ca.pem"
+
+networks:
+  - lima: shared
+vmType: qemu
+env:
+  SHIKARI_SCENARIO_NAME: "pl-vault-quorum-recovery"

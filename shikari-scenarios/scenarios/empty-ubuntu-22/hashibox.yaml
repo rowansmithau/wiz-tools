@@ -1,0 +1,14 @@
+# A scenario to launch a cluster without any configurations
+
+plain: true
+
+networks:
+  - lima: shared
+
+vmType: qemu
+
+env:
+  SHIKARI_SCENARIO_NAME: "empty-ubuntu-22"
+
+images:
+  - location: /Users/rowan/.shikari/wizbox-ubuntu-22/wizbox.qcow2

@@ -1,0 +1,170 @@
+plain: true
+provision:
+  - mode: system # Install Vault and Consul license
+    script: |
+      #!/bin/bash
+ 
+      if [[ -n $CONSUL_LICENSE ]]; then
+        echo "CONSUL_LICENSE=$CONSUL_LICENSE" > /etc/consul.d/consul.env
+      fi
+
+      if [[ -n $VAULT_LICENSE ]]; then
+        echo "VAULT_LICENSE=$VAULT_LICENSE" > /etc/vault.d/vault.env
+      fi
+
+  - mode: system # Configure Consul Client settings
+    script: |
+      #!/bin/bash
+
+      # config for Client
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
+      cat <<-EOF > /etc/consul.d/consul.hcl
+        data_dir  = "/opt/consul/data"
+        log_level  = "DEBUG"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+        datacenter = "${SHIKARI_CLUSTER_NAME}"   
+        
+      EOF
+      fi
+
+  - mode: system # Configure Consul server settings
+    script: |
+      #!/bin/bash
+
+      if [[ ${SHIKARI_VM_MODE} == "server" ]]; then
+      cat <<-EOF > /etc/consul.d/server.hcl
+        server = true
+        bootstrap_expect = ${SHIKARI_SERVER_COUNT}
+        data_dir  = "/opt/consul/data"
+        log_level  = "DEBUG"
+        bind_addr = {{ "\"{{ GetInterfaceIP \\\"lima0\\\"}}\"" }}
+        client_addr = "0.0.0.0"
+        retry_join = ["lima-${SHIKARI_CLUSTER_NAME}-srv-01.local"]
+        datacenter = "${SHIKARI_CLUSTER_NAME}"
+
+        ui_config { 
+          enabled = true
+        }
+      EOF
+
+      fi
+
+
+  - mode: system # Start Consul
+    script: |
+      systemctl enable --now consul
+
+
+
+  # \   \ /   /  _  \ |    |   \    | \__    ___/ #
+  #  \   Y   /  /_\  \|    |   /    |   |    |    #
+  #   \     /    |    \    |  /|    |___|    |    #
+  #    \___/\____|__  /______/ |_______ \____|    #
+
+
+
+  - mode: system # configure Vault Server
+    script: |
+      #!/bin/bash
+
+      # avoid running the script on restarts
+      if [[ -f /shikari-bootstrapped ]] then
+        exit 0
+      fi
+
+      HOSTNAME=$(hostname -s)
+      
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
+
+      cat <<-EOF > /etc/vault.d/vault.hcl
+      api_addr     = "http://${HOSTNAME}.local:8200"
+      cluster_addr = "http://${HOSTNAME}.local:8201"
+      
+      ui = true
+      log_level = "trace"
+
+      storage "consul" {
+        address = "localhost:8500"
+        path    = "vault/"
+      }
+      
+      listener "tcp" {
+        address     = "0.0.0.0:8200"
+        tls_disable = true
+      }
+      EOF
+
+      # Use nomad to format the config file if it exists
+      command -v nomad &>/dev/null && nomad fmt /etc/vault.d/vault.hcl
+      
+      # Start and Enabled Vault service
+      systemctl enable --now vault  
+
+      fi
+
+
+  - mode: system  # init and unseal Vault
+    script: |
+      
+      #!/usr/bin/env bash
+
+      # avoid running the script on restarts
+
+      if [[ -f /shikari-bootstrapped ]] then
+        exit 0
+      fi
+
+      if [[ ${SHIKARI_VM_MODE} == "client" ]]; then
+        export VAULT_ADDR=http://127.0.0.1:8200
+
+      
+        until curl -s $VAULT_ADDR/v1/sys/health; do
+          echo "Waiting for Vault"
+        done
+        
+        if [[ `hostname -s` == *"cli-01" ]]; then
+          vault operator init -key-shares=1 -key-threshold=1 -format=json > ~/VaultCreds.json
+          sudo mv ~/VaultCreds.json /etc/vault.d/VaultCreds.json
+          sudo chown root:vault /etc/vault.d/VaultCreds.json
+          sudo chmod 0640 /etc/vault.d/VaultCreds.json
+          VAULT_UNSEAL_KEY=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .unseal_keys_b64[0])
+          VAULT_TOKEN=$(sudo cat /etc/vault.d/VaultCreds.json | jq -r .root_token)
+        fi
+
+        echo export VAULT_ADDR="http://127.0.0.1:8200" | sudo tee -a /etc/profile.d/vault.sh
+        echo export VAULT_UNSEAL_KEY=$VAULT_UNSEAL_KEY | sudo tee -a /etc/profile.d/vault.sh 
+        echo export VAULT_TOKEN=$VAULT_TOKEN | sudo tee -a /etc/profile.d/vault.sh
+    
+
+        # Unseal Vault      
+        vault operator unseal ${VAULT_UNSEAL_KEY}
+
+        vault login ${VAULT_TOKEN}
+
+        # execute the following in a subshell to not overwrite VAULT_ADDR
+        (
+          if [[ $SHIKARI_CLIENT_COUNT > 1 ]]; then
+            for x in `seq 2 $SHIKARI_CLIENT_COUNT`; do
+
+              VAULT_ADDR="http://lima-${SHIKARI_CLUSTER_NAME}-cli-0$x.local:8200"
+
+              until [ "$(curl -s $VAULT_ADDR/v1/sys/health | jq -r '.initialized')" = "true" ]; do
+                echo "Waiting for Vault"
+                sleep 2
+              done
+
+              vault operator unseal $VAULT_UNSEAL_KEY
+            done
+          fi
+        )
+      fi
+
+      touch /shikari-bootstrapped
+
+networks:
+  - lima: shared
+vmType: qemu
+env:
+  SHIKARI_SCENARIO_NAME: "vault-consul-storage-quickstart"

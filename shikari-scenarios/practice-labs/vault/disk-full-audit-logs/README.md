@@ -1,0 +1,37 @@
+# Audit log filling the disk
+
+This scenario builds Vault cluster with Integrated Storage with TLS. Specificy the size of the cluster by setting number of servers using the `--servers/-s` flag.
+
+Additionally, it creates a 2MB file and mounts it as a disk at /opt/vault/audit. It then enables audit logging in Vault and loops through running queries to Vault
+in order to generate audit log entries which in a minute or two fills the audit disk.
+
+## Usage
+
+
+### Build
+
+The following steps will build a Vault cluster.
+
+```
+shikari create -n <cluster_name> -s 3 -e VAULT_LICENSE=$(cat <vault_license_file>)
+```
+
+### Access
+
+Export the Vault environment variable using the following command
+
+```
+eval $(shikari env -n <cluster_name> vault --tls)
+```
+
+Extract the Vault Token from the first server.
+
+```
+eval "export $(shikari exec -n <cluster_name> -i srv-01 env | grep TOKEN)"
+```
+
+### Destroy
+
+```
+shikari destroy -n <cluster_name> -f
+```
