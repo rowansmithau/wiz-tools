@@ -1,16 +1,17 @@
-# Shikari scenarios for HashiCorp engineers
+# Shikari scenarios
 A collection of Lima Templates that will be used with Shikari.
 
 ## Prerequisites
 
 The following tools are required to run these scenarios:
 
-* HashiCorp [Packer](https://developer.hashicorp.com/packer) (if you are building custom images)
+* HashiCorp [Packer](https://developer.hashicorp.com/packer)
 * CDRtools (if you are building custom images)
 * [Lima](https://lima-vm.io/)
 * [Shikari](https://github.com/ranjandas/shikari)
+* [socket_vmnet](https://lima-vm.io/docs/config/network/vmnet/#socket_vmnet)
 
-You can use the [Brewfile](Brewfile) shipped in this repository to install all the dependent tools.
+You can use the [Brewfile](Brewfile) shipped in this repository to install most of the dependent tools.
 
 ```
 $ brew bundle
@@ -18,22 +19,27 @@ Using hashicorp/tap
 Tapping ranjandas/shikari
 Installing ranjandas/shikari/shikari
 Using hashicorp/tap/packer
-Using hashicorp/tap/nomad
-Using hashicorp/tap/consul
 Using cdrtools
 Using qemu
 Using lima
-Using socket_vmnet
 Homebrew Bundle complete! 10 Brewfile dependencies now installed.
 ```
 
 ### Setup socket_vmnet
 
-The following commands must be run once to complete the required socket_vmnet configuration.
+socket_vmnet must be configured manually by following the process outlined at https://lima-vm.io/docs/config/network/vmnet/#socket_vmnet. As of writing:
 
 ```
-$ limactl sudoers > etc_sudoers.d_lima
-$ sudo install -o root etc_sudoers.d_lima /etc/sudoers.d/lima
+git clone https://github.com/lima-vm/socket_vmnet
+cd socket_vmnet
+git checkout v1.2.1
+make
+sudo make PREFIX=/opt/socket_vmnet install.bin
+
+limactl sudoers >etc_sudoers.d_lima
+less etc_sudoers.d_lima
+sudo install -o root etc_sudoers.d_lima /etc/sudoers.d/lima
+rm etc_sudoers.d_lima
 ```
 
 ### Run Test VM
@@ -59,7 +65,7 @@ lima0     Link encap:Ethernet  HWaddr 52:55:55:96:B6:B1
 Remove the test instance.
 
 ```
-$ limactl stop alpine; limactl delete alpine
+$ limactl delete -f alpine
 ```
 
 Once the above pre-requisites are met you can proceed with using Shikari to launch scenarios, such as the ones in this repo.
@@ -72,35 +78,36 @@ The following steps will build a VM image with Consul and Nomad installed, which
 
     ```
     $ cd packer
-    $ packer init hashibox.pkr.hcl
-    $ packer build -var-file variables.pkrvars.hcl hashibox.pkr.hcl
+    $ packer init wizbox.pkr.hcl
+    $ packer build wizbox.pkr.hcl
     ```
-    > NOTE: Pass `-var enterprise=true` for Enterprise binaries and `-var fips=true` for fips binaries repsectively.
     
-    This will build the VM image into the `.shikari` directory within your home directory (`~/.shikari`).
+    This will build the VM image into the `.shikari` directory within your home directory (`~/.shikari`). Each scenario references the image location in their respective hashibox.yaml file.
 
-2. Now you can run the scenarios by going into specific scenario directory and invoking the template using Shikari.
+2. At this point I suggest reading [shell-aliases.md](shell-aliases.md) to get a quick start on simple command usage.
+
+3. Now you can run the scenarios by going into specific scenario directory and invoking the template using Shikari.
 
     ```
-    $ cd scenarios/nomad-consul-quickstart
+    $ cd scenarios/empty
     $ shikari create --name demo --servers 3 --clients 3 -i ~/.shikari/<image-dir>/<image-file>.cqow2
     ```
 
     > NOTE: You can avoid passing the image on the CLI by setting the `image.location` inside the template file (hashibox.yaml) to point to the newly created image file in the previous step. (this should end with `.qcow2`). Run the following command to get the absolute path to the image file, for example:
     > ```
-    > $ readlink -f ~/.shikari/enterprise-c-1.19-n-1.8-v-1.17-b-0.16/hashibox.qcow2
-    > /Users/Billy/.shikari/enterprise-c-1.19-n-1.8-v-1.17-b-0.16/hashibox.qcow2
+    > $ readlink -f ~/.shikari/wizbox-fedora/wizbox.qcow2
+    > /Users/Billy/.shikari/wizbox-fedora/wizbox.qcow2
     > ```
 
     The above example command will create 3 servers and 3 clients using the image we previously built using Packer.
 
-3. Export the environment variables to access the cluster services.
+4. Export the environment variables to access the cluster services.
 
     ```
     $ eval $(shikari env -n demo consul)
     ```
 
-4. The `shikari list` command can be used to view a list of vm's and their status.
+5. The `shikari list` command can be used to view a list of vm's and their status.
 
     ```
     $ shikari list
@@ -113,7 +120,7 @@ The following steps will build a VM image with Consul and Nomad installed, which
     demo       demo-srv-03    192.168.105.7     Running    nomad-consul-quickstart    100         4             4       /Users/Billy/.shikari/enterprise-c-1.19-n-1.8-v-1.17-b-0.16/hashibox.qcow2
     ```
 
-5. A shell can be opened in a VM using the `shikari shell <vm-name>` command, or commands can be run in one or more VM's from your local shell using the `shikari exec <vm-name>` command.
+6. A shell can be opened in a VM using the `shikari shell <vm-name>` command, or commands can be run in one or more VM's from your local shell using the `shikari exec <vm-name>` command.
 
 ```
 $ shikari shell -h         
@@ -152,13 +159,9 @@ See the [scenario creation guide](scenario-creation.md).
 
 ## Frequently Asked Questions
 
-**Q: Can I use a mix of enterprise and community edition binaries when creating an image?**
-
-**A:** No, at present you must make the decision when creating the image as to whether all products will use enterprise or community edition binaries, there is no ability to specify a mix, for example, Vault Enterprise and Consul Community Edition.
-
 **Q: Which apps are installed by default?**
 
-**A:** Docker, Consul, Nomad, Boundary, Vault.
+**A:** Docker. This is controlled by the `build.provisioner` step of `wizbox.pkr.hcl`.
 
 **Q: How do I configure the amount of disk/CPU/memory assigned to each VM?**
 
@@ -172,15 +175,6 @@ See the [scenario creation guide](scenario-creation.md).
 
 **A:** First, identify the name of the VM which is experiencing the issue as depending on the steps you are executing the issue may be present on just one VM. Second, open a shell on the VM in question by running `shikari shell <vm-name>`. Last, check the output of `cloud-init status` and review `/var/log/cloud-init.log` and `/var/log/cloud-init-output.log` (requires root/sudo). The `/var/log/cloud-init-output.log` file will often be the most helpful as it details the output of the scripts run at startup.
 
-**Q: How do I provide a license for each of the HashiCorp products when creating a scenario?**
-
-**A:** When running `shikari create` you must supply the license for each product individually, including specifying the the `-e` flag for each product/variable. For example:
-
-```
-shikari create -n demo -s 3 -e VAULT_LICENSE=$VAULT_LICENSE -e CONSUL_LICENSE=$(cat ~/consul.license) -i ~/.shikari/enterprise-c-1.19-n-1.8-v-1.17-b-0.16/hashibox.qcow2
-```
-
-You can either provide a reference to an existing environment variable present on your host machine (used in the Vault example) or by referencing the license file on disk (used in the Consul example).
 
 **Q: How do I ensure a step/script is only executed at first boot?**
 
@@ -196,7 +190,3 @@ You can either provide a reference to an existing environment variable present o
 **Q: How can I ensure only one specific VM completes a step, i.e `vault operator init`?**
 
 **A:** When creating a step you can use a similar pattern to the previous question to target a specific hostname, for example `if [[ "$HOSTNAME" == *"01"* ]]; then`. Consult existing scenarios for working examples. 
-
-**Q: VM's suddenly fail to start with an error message like `error calling fd_connect: fd_connect: dial unix /private/var/run/lima/socket_vmnet.shared: connect: connection refused"` or they don't receive IP addresses on the lima0 interface**
-
-**A:** Issues have been experienced along these lines and appear to be related to `socket_vmnet`. Though they are not yet fully understood / a consistent root cause is yet to be identified for each occurrence, we have observed that running `sudo ifconfig bridge100 destroy; sudo /bin/launchctl kickstart -kp system/com.apple.bootpd` can help resolve the issue.
