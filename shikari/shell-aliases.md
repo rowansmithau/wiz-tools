@@ -10,14 +10,14 @@ sd = shikari delete
 # shikari quick commands
 sc() {
   (
-    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari-scenarios/scenarios/empty" && 
+    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari/scenarios/empty" && 
     shikari create -n wiz -s 1
   )
 }
 
 sd() {
   (
-    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari-scenarios/scenarios/empty" && 
+    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari/scenarios/empty" && 
     shikari destroy -n wiz -f
   )
 }
@@ -28,14 +28,14 @@ ss() {
 
 scu() {
   (
-    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari-scenarios/scenarios/empty-ubuntu" && 
+    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari/scenarios/empty-ubuntu" && 
     shikari create -n wizubuntu -s 1
   )
 }
 
 sdu() {
   (
-    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari-scenarios/scenarios/empty-ubuntu" && 
+    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari/scenarios/empty-ubuntu" && 
     shikari destroy -n wizubuntu -f
   )
 }
@@ -46,14 +46,14 @@ ssu() {
 
 scu22() {
   (
-    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari-scenarios/scenarios/empty-ubuntu-22" && 
+    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari/scenarios/empty-ubuntu-22" && 
     shikari create -n wizubuntu22 -s 1
   )
 }
 
 sdu22() {
   (
-    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari-scenarios/scenarios/empty-ubuntu-22" && 
+    cd "/Users/rowan/Downloads/wiz-git/wiz-tools/shikari/scenarios/empty-ubuntu-22" && 
     shikari destroy -n wizubuntu22 -f
   )
 }
