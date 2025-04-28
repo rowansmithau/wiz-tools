@@ -11,4 +11,4 @@ env:
   SHIKARI_SCENARIO_NAME: "empty"
 
 images:
-  - location: /Users/rowan/.shikari/wizbox-fedora/wizbox.qcow2
+  - location: ~/.shikari/wizbox-fedora/wizbox.qcow2

@@ -11,4 +11,4 @@ env:
   SHIKARI_SCENARIO_NAME: "empty-ubuntu-22"
 
 images:
-  - location: /Users/rowan/.shikari/wizbox-ubuntu-22/wizbox.qcow2
+  - location: ~/.shikari/wizbox-ubuntu-22/wizbox.qcow2
